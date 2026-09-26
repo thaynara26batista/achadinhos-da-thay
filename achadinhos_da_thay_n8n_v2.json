@@ -1,0 +1,148 @@
+{
+  "name": "Achadinhos da Thay — Autopiloto V2",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "achadinhos-thay-produtos-v2",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Entrada de Produtos",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        0
+      ],
+      "webhookId": "achadinhos-thay-produtos-v2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allowed = new Set(['Casa','Beleza','Eletrônicos','Moda','Pet']);\nconst seen = new Set();\nconst input = $input.all().flatMap(i => Array.isArray(i.json.products) ? i.json.products : [i.json]);\n\nconst candidates = [];\n\nfor (const p of input) {\n  const name = String(p.name ?? '').trim();\n  const price = Number(p.price);\n  const category = String(p.category ?? '').trim();\n  const link = String(p.affiliateLink ?? p.link ?? '').trim();\n  const productId = String(p.productId ?? name).trim();\n  const priceConfirmed = p.priceConfirmed === true;\n  const discountConfirmed = p.discountConfirmed === true;\n\n  if (!name || !link || !productId) continue;\n  if (!allowed.has(category)) continue;\n  if (!Number.isFinite(price) || price < 10 || price > 1000) continue;\n  if (!priceConfirmed) continue;\n\n  const key = productId.toLowerCase();\n  if (seen.has(key)) continue;\n  seen.add(key);\n\n  const sales = Number(p.sales ?? 0);\n  const discount = Number(p.discountPercent ?? 0);\n  const commission = Number(p.commissionPercent ?? 0);\n\n  // Pontuação objetiva; campos ausentes valem zero.\n  let score = 0;\n  if (discountConfirmed && discount > 0) score += Math.min(discount, 40);\n  if (sales > 0) score += Math.min(Math.log10(sales + 1) * 8, 30);\n  if (commission > 0) score += Math.min(commission, 20);\n  if (price <= 100) score += 10;\n\n  candidates.push({\n    ...p,\n    name, price, category, affiliateLink: link, productId,\n    discountConfirmed,\n    score: Number(score.toFixed(2))\n  });\n}\n\n// Ordenação: maior oportunidade primeiro; em empate, menor preço.\ncandidates.sort((a,b) => b.score - a.score || a.price - b.price);\n\nreturn candidates.slice(0, 10).map((p, i) => ({\n  json: {\n    ...p,\n    position: i + 1,\n    scheduledTime: ['09:00','10:30','12:00','13:30','15:00','16:30','18:00','19:30','21:00','22:30'][i],\n    status: 'fila',\n    copy:\n`💗 ACHADINHO DA THAY!\n\nGente, olha esse achadinho 😍\n\n🛍️ ${p.name}\n💰 R$ ${p.price.toFixed(2).replace('.', ',')}` +\n(p.discountConfirmed && p.discountPercent ? `\\n🔥 ${p.discountPercent}% de desconto` : '') +\n`\\n\\n🛒 QUERO VER:\\n👇\\n${p.affiliateLink}\\n\\n⚠️ Preço e condições podem mudar. Confira no anúncio.`\n  }\n}));"
+      },
+      "id": "2",
+      "name": "Filtro + Pontuação Thay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "fila",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "3",
+      "name": "Somente Aprovados",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: {\n    ...item.json,\n    readyToPublish: true,\n    destination: 'Achadinhos da Thay'\n  }\n}));"
+      },
+      "id": "4",
+      "name": "Preparar Publicação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, ofertasNaFila: $input.all().length, destino: 'Achadinhos da Thay', status: 'pronto_para_publicador' } }}",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Retorno",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        180,
+        -100
+      ]
+    }
+  ],
+  "connections": {
+    "Entrada de Produtos": {
+      "main": [
+        [
+          {
+            "node": "Filtro + Pontuação Thay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtro + Pontuação Thay": {
+      "main": [
+        [
+          {
+            "node": "Somente Aprovados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Somente Aprovados": {
+      "main": [
+        [
+          {
+            "node": "Preparar Publicação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Preparar Publicação": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "achadinhos-thay-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
